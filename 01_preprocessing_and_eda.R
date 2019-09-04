@@ -131,4 +131,86 @@ puma_nyc_final <- puma_nyc %>% select(.,c(geoid, estimate,community_district))
 # NOTE: there will be some issues, as certain geoid's have been estimated as the sum total of multiple cd's
 # for this reason, I've left the geoid's in, so we can look to figure out the issue later.
 
+# UPDATE: Based on the lack of up-to-date information regarding population at the CD level,
+# the analysis will have to be conducted at the PUMA level.
+
 homeless_clean <- left_join(homeless_clean, puma_nyc_final, by = c("boro_cd" = "community_district"))
+
+#aggregate total cases to PUMA level
+
+puma_agg <- aggregate(list(cases = homeless_clean$cases,
+                           people = homeless_clean$people),
+                      by = list(puma = homeless_clean$geoid,
+                                pop_est = homeless_clean$estimate),
+                      function(x) {sum(x)})
+
+
+
+# load in PUMA shapefile
+
+puma_shape <- read_sf('Public Use Microdata Areas (PUMA)/geo_export_d66ecf93-5ed7-4d78-819e-4fd2b0f4c16a.shp')
+
+puma_pop <- paste0('PUMA: ', puma_shape$puma)
+
+leaflet(puma_shape) %>% 
+  addProviderTiles('CartoDB.Positron') %>% 
+  addPolygons(weight = 1,
+              fillOpacity = .9,
+              popup = puma_pop)
+
+# prepare for join
+
+puma_shape$puma <- as.integer(puma_shape$puma)
+
+#removing additional numbers at start of PUMA ID
+puma_agg$puma <- as.integer(puma_agg$puma) - 3600000
+
+
+
+puma_shape_final <- left_join(puma_shape, puma_agg)
+
+puma_shape_final$newly_hom_case_rate <- puma_shape_final$cases/puma_shape_final$pop_est
+
+puma_shape_final$newly_hom_pop_rate <- puma_shape_final$people/puma_shape_final$pop_est
+
+
+
+pal_cases_rate <- colorBin(
+  palette = 'Oranges',
+  domain = puma_shape_final$newly_hom_case_rate
+)
+
+pal_individuals_rate <- colorBin(
+  palette = 'Oranges',
+  domain = puma_shape_final$newly_hom_pop_rate
+)
+
+pop_cases_rate <- paste0('Community District: ', puma_shape_final$puma, '<br>',
+                    'Average Monthly New Homeless Cases per Population, 1yr: ', puma_shape_final$newly_hom_case_rate, '<br>',
+                    'Average Monthly New Homeless Cases, 1yr: ', puma_shape_final$cases)
+
+pop_people_rate <- paste0('Community District: ', puma_shape_final$puma, '<br>',
+                     'Average Monthly Newly Homeless People per Population, 1yr: ', puma_shape_final$newly_hom_pop_rate, '<br>',
+                     'Average Monthly Newly Homeless People, 1yr: ', puma_shape_final$people)
+
+
+
+leaflet(puma_shape_final) %>% 
+  addProviderTiles('CartoDB.Positron') %>% 
+  addPolygons(fillColor = ~pal_cases_rate(puma_shape_final$newly_hom_case_rate),
+              weight = 1,
+              group = 'Cases',
+              fillOpacity = .9,
+              popup = pop_cases_rate) %>% 
+  addPolygons(fillColor = ~pal_individuals_rate(puma_shape_final$newly_hom_pop_rate),
+              weight = 1,
+              group = 'Individuals',
+              fillOpacity = .9,
+              popup = pop_people_rate) %>%
+  addLayersControl(baseGroups = c('Individuals', 'Cases'),
+                   options = layersControlOptions(collapsed = FALSE),
+                   position = 'bottomright')
+
+
+
+
