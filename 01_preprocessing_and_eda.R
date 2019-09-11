@@ -173,6 +173,8 @@ puma_shape_final$newly_hom_case_rate <- puma_shape_final$cases/puma_shape_final$
 
 puma_shape_final$newly_hom_pop_rate <- puma_shape_final$people/puma_shape_final$pop_est
 
+puma_shape_final <- st_transform(puma_shape_final, crs = '+proj=longlat +datum=WGS84')
+
 
 
 pal_cases_rate <- colorBin(
@@ -185,6 +187,16 @@ pal_individuals_rate <- colorBin(
   domain = puma_shape_final$newly_hom_pop_rate
 )
 
+pal_cases_total <- colorBin(
+  palette = 'Oranges',
+  domain = puma_shape_final$cases
+)
+
+pal_individuals_total <- colorBin(
+  palette = 'Oranges',
+  domain = puma_shape_final$people
+)
+
 pop_cases_rate <- paste0('Community District: ', puma_shape_final$puma, '<br>',
                     'Average Monthly New Homeless Cases per Population, 1yr: ', puma_shape_final$newly_hom_case_rate, '<br>',
                     'Average Monthly New Homeless Cases, 1yr: ', puma_shape_final$cases)
@@ -193,21 +205,39 @@ pop_people_rate <- paste0('Community District: ', puma_shape_final$puma, '<br>',
                      'Average Monthly Newly Homeless People per Population, 1yr: ', puma_shape_final$newly_hom_pop_rate, '<br>',
                      'Average Monthly Newly Homeless People, 1yr: ', puma_shape_final$people)
 
+pop_cases_total <- paste0('Community District: ', puma_shape_final$puma, '<br>',
+                         'Average Monthly New Homeless Cases per Population, 1yr: ', puma_shape_final$cases, '<br>',
+                         'Average Monthly New Homeless Cases, 1yr: ', puma_shape_final$cases)
+
+pop_people_total <- paste0('Community District: ', puma_shape_final$puma, '<br>',
+                          'Average Monthly Newly Homeless People per Population, 1yr: ', puma_shape_final$people, '<br>',
+                          'Average Monthly Newly Homeless People, 1yr: ', puma_shape_final$people)
+
 
 
 leaflet(puma_shape_final) %>% 
   addProviderTiles('CartoDB.Positron') %>% 
   addPolygons(fillColor = ~pal_cases_rate(puma_shape_final$newly_hom_case_rate),
               weight = 1,
-              group = 'Cases',
+              group = 'Cases - Rate',
               fillOpacity = .9,
               popup = pop_cases_rate) %>% 
   addPolygons(fillColor = ~pal_individuals_rate(puma_shape_final$newly_hom_pop_rate),
               weight = 1,
-              group = 'Individuals',
+              group = 'Individuals - Rate',
               fillOpacity = .9,
               popup = pop_people_rate) %>%
-  addLayersControl(baseGroups = c('Individuals', 'Cases'),
+  addPolygons(fillColor = ~pal_cases_total(puma_shape_final$newly_hom_case_rate),
+              weight = 1,
+              group = 'Cases - Total',
+              fillOpacity = .9,
+              popup = pop_cases_total) %>% 
+  addPolygons(fillColor = ~pal_individuals_total(puma_shape_final$people),
+              weight = 1,
+              group = 'Individuals - Total',
+              fillOpacity = .9,
+              popup = pop_people_total) %>%
+  addLayersControl(baseGroups = c('Individuals - Rate', 'Individuals - Total', 'Cases - Rate', 'Cases - Total'),
                    options = layersControlOptions(collapsed = FALSE),
                    position = 'bottomright')
 
