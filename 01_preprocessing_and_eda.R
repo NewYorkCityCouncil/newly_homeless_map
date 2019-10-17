@@ -10,12 +10,21 @@ library(tidycensus)
 
 
 
-last_known_raw <- read_csv('Associated_Address_by_Borough_and_Community_District.csv') %>% 
+last_known_raw <- read_csv('https://data.cityofnewyork.us/resource/ur7y-ziyb.csv?$limit=9999999') %>% 
   clean_names()
 
 
 last_known_raw$report_date <- as.POSIXct(last_known_raw$report_date, format="%m/%d/%Y")
 
+
+simpleCap <- function(x) {
+  s <- strsplit(x, " ")[[1]]
+  paste(toupper(substring(s, 1,1)), substring(s, 2),
+        sep="", collapse=" ")
+}
+
+last_known_raw$case_type <- sapply(tolower(last_known_raw$case_type), simpleCap)
+last_known_raw$case_type <- gsub(' ', '_', last_known_raw$case_type)
 
 unkown_cd <- last_known_raw[last_known_raw$community_district %in% 'No CD',]
 
@@ -23,60 +32,23 @@ last_known <- last_known_raw %>% filter(str_detect(community_district, '[0-9]+')
 last_known$community_district <- as.numeric(last_known$community_district)
 
 
-agg_last_known <- aggregate(list(cases = last_known$cases,
-                                 people = last_known$individuals),
-                            by = list(boro_cd = last_known$community_district),
-                            function(x) {round(sum(x)/12,0)})
+# agg_last_known <- aggregate(list(cases = last_known$cases,
+#                                  people = last_known$individuals),
+#                             by = list(boro_cd = last_known$community_district),
+#                             function(x) {round(sum(x)/12,0)})
 
 
-comdist <- read_sf('Community Districts/geo_export_717a4fd2-0fdf-4875-add5-968bee9ff0da.shp') %>% 
-  clean_names()
+# comdist <- read_sf('Community Districts/geo_export_717a4fd2-0fdf-4875-add5-968bee9ff0da.shp') %>% 
+#   clean_names()
+# 
+# 
+# homeless <- left_join(comdist, last_known, by = c('boro_cd' = 'community_district'))
+# homeless <- homeless %>% st_transform(., crs = '+proj=longlat +datum=WGS84')
 
-
-homeless <- left_join(comdist, agg_last_known)
-homeless <- homeless %>% st_transform(., crs = '+proj=longlat +datum=WGS84')
-
-homeless_clean <- filter(homeless, !is.na(cases), !is.na(people))
-
-
-
-# Map raw numeric data ----------------------------------------------------
+homeless_clean <- filter(last_known, !is.na(cases), !is.na(individuals))
 
 
 
-pal_cases <- colorBin(
-  palette = 'Oranges',
-  domain = homeless_clean$cases
-)
-
-pal_individuals <- colorBin(
-  palette = 'Oranges',
-  domain = homeless_clean$people
-)
-
-pop_cases <- paste0('Community District: ', homeless_clean$boro_cd, '<br>',
-              'Average Monthly New Homeless Cases, 1yr: ', homeless_clean$cases)
-
-pop_people <- paste0('Community District: ', homeless_clean$boro_cd, '<br>',
-                    'Average Monthly Newly Homeless People, 1yr: ', homeless_clean$people)
-
-
-
-leaflet(homeless_clean) %>% 
-  addProviderTiles('CartoDB.Positron') %>% 
-  addPolygons(fillColor = ~pal_cases(homeless_clean$cases),
-              weight = 1,
-              group = 'Cases',
-              fillOpacity = .9,
-              popup = pop_cases) %>% 
-  addPolygons(fillColor = ~pal_individuals(homeless_clean$people),
-              weight = 1,
-              group = 'Individuals',
-              fillOpacity = .9,
-              popup = pop_people) %>%
-  addLayersControl(baseGroups = c('Individuals', 'Cases'),
-                   options = layersControlOptions(collapsed = FALSE),
-                   position = 'bottomright')
 
 
 
@@ -86,7 +58,7 @@ v17 <- load_variables(2017, "acs5", cache = TRUE)
 
 puma <- get_acs(geography = 'public use microdata area', 
                 state = "NY", 
-                variables = 'B01003_001', 
+                variables = 'B01003_001',
                 year = 2017,
                 key = 'd74c1b2b7e13feac45f63d4b5f2e8789338fc6fb') %>% 
   janitor::clean_names()
@@ -126,6 +98,10 @@ puma_nyc_final <- puma_nyc %>% select(.,c(geoid, estimate,community_district))
 
 
 
+
+# test <- read_csv('ACS_17_5YR_S1701/ACS_17_5YR_S1701_with_ann.csv')
+
+
 # Join estimates and homelessness data ------------------------------------
 
 # NOTE: there will be some issues, as certain geoid's have been estimated as the sum total of multiple cd's
@@ -134,113 +110,102 @@ puma_nyc_final <- puma_nyc %>% select(.,c(geoid, estimate,community_district))
 # UPDATE: Based on the lack of up-to-date information regarding population at the CD level,
 # the analysis will have to be conducted at the PUMA level.
 
-homeless_clean <- left_join(homeless_clean, puma_nyc_final, by = c("boro_cd" = "community_district"))
+homeless_clean <- left_join(homeless_clean, puma_nyc_final)
+
+# 2018 only
+homeless_18 <- homeless_clean %>% 
+  mutate(year = as.numeric(format(report_date, '%Y'))) %>% 
+  filter(year == 2018)
 
 #aggregate total cases to PUMA level
 
-puma_agg <- aggregate(list(cases = homeless_clean$cases,
-                           people = homeless_clean$people),
-                      by = list(puma = homeless_clean$geoid,
-                                pop_est = homeless_clean$estimate),
+puma_agg_18 <- aggregate(list(cases = homeless_18$cases,
+                           people = homeless_18$individuals),
+                      by = list(puma = homeless_18$geoid,
+                                pop_est = homeless_18$estimate),
                       function(x) {sum(x)})
+
+puma_agg_18 <- puma_agg_18 %>% 
+  mutate(cases_norm = round(cases/pop_est, 4)*100) %>% 
+  mutate(people_norm = round(people/pop_est, 4)*100)
 
 
 
 # load in PUMA shapefile
 
-puma_shape <- read_sf('Public Use Microdata Areas (PUMA)/geo_export_d66ecf93-5ed7-4d78-819e-4fd2b0f4c16a.shp')
+puma_shape <- read_sf('Public Use Microdata Areas (PUMA)/geo_export_d66ecf93-5ed7-4d78-819e-4fd2b0f4c16a.shp') %>% 
+  select(puma, geometry)
 
-puma_pop <- paste0('PUMA: ', puma_shape$puma)
 
-leaflet(puma_shape) %>% 
+#join to homelessness file
+
+puma_agg_18$puma <- gsub('^360', '', puma_agg_18$puma)
+
+puma_agg_18 <- left_join(puma_shape, puma_agg_18)
+
+puma_agg_18 <- puma_agg_18 %>% 
+  st_as_sf(wkt = puma_agg_18$geometry, crs = 4326)
+
+st_write(puma_agg_18, 'puma_18_agg.shp', delete_layer = TRUE)
+
+puma_pop <- paste0('PUMA: ', puma_agg_18$puma, '<br>',
+                   "% Pop Newly Homeless: ", puma_agg_18$people_norm, '<br>',
+                   'Number of Cases: ', puma_agg_18$cases)
+
+pal_puma <- colorBin(
+  palette = 'Blues',
+  domain = puma_agg_18$people_norm)
+
+leaflet(puma_agg_18) %>% 
   addProviderTiles('CartoDB.Positron') %>% 
   addPolygons(weight = 1,
-              fillOpacity = .9,
+              fillOpacity = .5,
+              fillColor = ~pal_puma(puma_agg_18$cases_norm),
               popup = puma_pop)
 
-# prepare for join
-
-puma_shape$puma <- as.integer(puma_shape$puma)
-
-#removing additional numbers at start of PUMA ID
-puma_agg$puma <- as.integer(puma_agg$puma) - 3600000
 
 
 
-puma_shape_final <- left_join(puma_shape, puma_agg)
 
-puma_shape_final$newly_hom_case_rate <- puma_shape_final$cases/puma_shape_final$pop_est
+# Prepare data for Shiny Mapping  ---------------------------------------------
 
-puma_shape_final$newly_hom_pop_rate <- puma_shape_final$people/puma_shape_final$pop_est
+newhom_spread <- homeless_clean %>% 
+  gather(variable, value, -(report_date:case_type)) %>% 
+  unite(temp, case_type, variable) %>% 
+  spread(temp, value)
 
-puma_shape_final <- st_transform(puma_shape_final, crs = '+proj=longlat +datum=WGS84')
+newhom_spread$case_total = newhom_spread$Adult_Family_cases + newhom_spread$Family_With_Children_cases + newhom_spread$Single_Adult_cases
+newhom_spread$ppl_total = newhom_spread$Adult_Family_individuals + newhom_spread$Family_With_Children_individuals + newhom_spread$Single_Adult_individuals
+  
+newhom_spread <- left_join(newhom_spread, puma_nyc_final) %>% 
+  rename(puma = geoid)
 
+newhom_spread$puma <- gsub('^360', '', newhom_spread$puma)
 
+geo_newhom_spread <- left_join(puma_shape, newhom_spread)
 
-pal_cases_rate <- colorBin(
-  palette = 'Oranges',
-  domain = puma_shape_final$newly_hom_case_rate
-)
-
-pal_individuals_rate <- colorBin(
-  palette = 'Oranges',
-  domain = puma_shape_final$newly_hom_pop_rate
-)
-
-pal_cases_total <- colorBin(
-  palette = 'Oranges',
-  domain = puma_shape_final$cases
-)
-
-pal_individuals_total <- colorBin(
-  palette = 'Oranges',
-  domain = puma_shape_final$people
-)
-
-pop_cases_rate <- paste0('Community District: ', puma_shape_final$puma, '<br>',
-                    'Average Monthly New Homeless Cases per Population, 1yr: ', puma_shape_final$newly_hom_case_rate, '<br>',
-                    'Average Monthly New Homeless Cases, 1yr: ', puma_shape_final$cases)
-
-pop_people_rate <- paste0('Community District: ', puma_shape_final$puma, '<br>',
-                     'Average Monthly Newly Homeless People per Population, 1yr: ', puma_shape_final$newly_hom_pop_rate, '<br>',
-                     'Average Monthly Newly Homeless People, 1yr: ', puma_shape_final$people)
-
-pop_cases_total <- paste0('Community District: ', puma_shape_final$puma, '<br>',
-                         'Average Monthly New Homeless Cases per Population, 1yr: ', puma_shape_final$cases, '<br>',
-                         'Average Monthly New Homeless Cases, 1yr: ', puma_shape_final$cases)
-
-pop_people_total <- paste0('Community District: ', puma_shape_final$puma, '<br>',
-                          'Average Monthly Newly Homeless People per Population, 1yr: ', puma_shape_final$people, '<br>',
-                          'Average Monthly Newly Homeless People, 1yr: ', puma_shape_final$people)
+st_write(geo_newhom_spread, 'geo_newhom_spread/geo.shp', delete_layer = TRUE)
 
 
 
-leaflet(puma_shape_final) %>% 
-  addProviderTiles('CartoDB.Positron') %>% 
-  addPolygons(fillColor = ~pal_cases_rate(puma_shape_final$newly_hom_case_rate),
-              weight = 1,
-              group = 'Cases - Rate',
-              fillOpacity = .9,
-              popup = pop_cases_rate) %>% 
-  addPolygons(fillColor = ~pal_individuals_total(puma_shape_final$people),
-              weight = 1,
-              group = 'Individuals - Total',
-              fillOpacity = .9,
-              popup = pop_people_total) %>%
-  addPolygons(fillColor = ~pal_individuals_rate(puma_shape_final$newly_hom_pop_rate),
-              weight = 1,
-              group = 'Individuals - Rate',
-              fillOpacity = .9,
-              popup = pop_people_rate) %>%
-  addPolygons(fillColor = ~pal_cases_total(puma_shape_final$cases),
-              weight = 1,
-              group = 'Cases - Total',
-              fillOpacity = .9,
-              popup = pop_cases_total) %>% 
-  addLayersControl(baseGroups = c('Individuals - Rate', 'Individuals - Total', 'Cases - Rate', 'Cases - Total'),
-                   options = layersControlOptions(collapsed = FALSE),
-                   position = 'bottomright')
 
 
 
+homeless_for_shiny <- left_join(homeless_clean, puma_nyc_final) %>% 
+  rename(puma = geoid)
+
+homeless_for_shiny$puma <- gsub('^360', '', homeless_for_shiny$puma)
+
+geo_hom <- left_join(puma_shape, homeless_for_shiny) %>% 
+  mutate(#new_hom_percent = round((individuals/estimate)*100, 2),
+         report_date = as.character(report_date)) %>% 
+  select(puma, geometry, report_date, case_type, cases, individuals)
+
+
+geo_hom_final <- gather(geo_hom, 'measure', 'count', -c(puma, geometry, report_date, case_type))
+
+geo_hom <- gather(geo_hom, 'measure', 'count', -c(puma, geometry, report_date))
+
+
+st_write(geo_hom_final, 'geo_hom/geo.shp', delete_layer = TRUE)
 
