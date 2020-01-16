@@ -31,11 +31,36 @@ unkown_cd <- last_known_raw[last_known_raw$community_district %in% 'No CD',]
 last_known <- last_known_raw %>% filter(str_detect(community_district, '[0-9]+'))
 last_known$community_district <- as.numeric(last_known$community_district)
 
+#calculating average cases and people per month. 
+agg_last_known <- aggregate(list(cases = last_known$cases,
+                                 people = last_known$individuals),
+                            by = list(boro_cd = last_known$community_district,
+                                      case_type = last_known$case_type),
+                            function(x) {round(sum(x)/length(unique(last_known$report_date)),0)})
 
-# agg_last_known <- aggregate(list(cases = last_known$cases,
-#                                  people = last_known$individuals),
-#                             by = list(boro_cd = last_known$community_district),
-#                             function(x) {round(sum(x)/12,0)})
+agg_last_known_families_w_children <- agg_last_known %>% 
+  filter(case_type == "Family_With_Children") %>% 
+  arrange(desc(people))
+
+agg_last_known_families_w_children$total_people <- sum(agg_last_known_families_w_children$people)
+agg_last_known_families_w_children$percent <- round(100*agg_last_known_families_w_children$people/agg_last_known_families_w_children$total_people, 2)
+
+agg_last_known_single <- agg_last_known %>% 
+  filter(case_type == "Single_Adult") %>% 
+  arrange(desc(people))
+
+agg_last_known_single$total_people <- sum(agg_last_known_single$people)
+agg_last_known_single$percent <- round(100*agg_last_known_single$people/agg_last_known_single$total_people, 2)
+
+
+
+
+
+
+
+
+
+
 
 
 # comdist <- read_sf('Community Districts/geo_export_717a4fd2-0fdf-4875-add5-968bee9ff0da.shp') %>% 
@@ -189,23 +214,71 @@ st_write(geo_newhom_spread, 'geo_newhom_spread/geo.shp', delete_layer = TRUE)
 
 
 
+# CDs back to character $ combined, as they'll end up in popup 
 
+homeless_clean <- homeless_clean %>% 
+  mutate(community_district = as.character(community_district)) %>% 
+  mutate(community_district = ifelse(community_district == "101" | community_district == "102",
+                                     '101 & 102',
+                                     ifelse(community_district == "104" | community_district == "105",
+                                            '104 & 105',
+                                            ifelse(community_district == "501" | community_district == "502",
+                                                   '501 & 502',
+                                                   ifelse(community_district == "503" | community_district == "506",
+                                                          '503 & 506',
+                                                          community_district)))))
 
-homeless_for_shiny <- left_join(homeless_clean, puma_nyc_final) %>% 
+# Now retotal rows to combine values that are currently listed across multiple CD's that exist in the same PUMA
+
+homeless_for_shiny <- aggregate(list(cases = homeless_clean$cases,
+                                       individuals = homeless_clean$individuals),
+                                  by = list(report_date = homeless_clean$report_date, 
+                                            borough = homeless_clean$borough, 
+                                            community_district = homeless_clean$community_district, 
+                                            case_type = homeless_clean$case_type, 
+                                            geoid = homeless_clean$geoid, 
+                                            estimate = homeless_clean$estimate),
+                                  function(x) {sum(x)}) %>% 
   rename(puma = geoid)
 
 homeless_for_shiny$puma <- gsub('^360', '', homeless_for_shiny$puma)
 
-geo_hom <- left_join(puma_shape, homeless_for_shiny) %>% 
+# Create new agg dataset of totals, to be joined into homeless_for_shiny df
+hom_for_shiny_totals_agg <- aggregate(list(cases = homeless_for_shiny$cases,
+                                           individuals = homeless_for_shiny$individuals),
+                                      by = list(report_date = homeless_for_shiny$report_date, 
+                                                borough = homeless_for_shiny$borough, 
+                                                community_district = homeless_for_shiny$community_district, 
+                                                puma = homeless_for_shiny$puma, 
+                                                estimate = homeless_for_shiny$estimate),
+                                      function(x) {sum(x)}) %>% 
+  mutate(case_type = 'total')
+
+homeless_for_shiny_final <- rbind(homeless_for_shiny, hom_for_shiny_totals_agg)
+
+geo_hom <- left_join(puma_shape, homeless_for_shiny_final) %>% 
   mutate(#new_hom_percent = round((individuals/estimate)*100, 2),
          report_date = as.character(report_date)) %>% 
-  select(puma, geometry, report_date, case_type, cases, individuals)
+  select(puma, community_district, geometry, report_date, case_type, cases, individuals)
 
 
-geo_hom_final <- gather(geo_hom, 'measure', 'count', -c(puma, geometry, report_date, case_type))
+geo_hom_final <- gather(geo_hom, 'measure', 'count', -c(puma, community_district, geometry, report_date, case_type))
 
-geo_hom <- gather(geo_hom, 'measure', 'count', -c(puma, geometry, report_date))
+#geo_hom <- gather(geo_hom, 'measure', 'count', -c(puma, geometry, report_date))
+
+geo_hom_final$case_type <- ifelse(geo_hom_final$case_type == "Adult_Family",
+                                  "Adult Family",
+                                  ifelse(geo_hom_final$case_type == "Family_With_Children",
+                                         "Family with Children",
+                                         ifelse(geo_hom_final$case_type == "Single_Adult",
+                                                "Single Adult",
+                                                "Total")))
 
 
 st_write(geo_hom_final, 'geo_hom/geo.shp', delete_layer = TRUE)
+
+
+
+
+ggplot(cd_shape_agg, aes(x = total)) + geom_histogram()
 
