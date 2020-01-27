@@ -123,13 +123,15 @@ total_map <- leaflet(cd_shape_final, options = leafletOptions(zoomControl = FALS
   addProviderTiles('CartoDB.Positron') %>% 
   addPolygons(weight = 1,
               fillOpacity = .5,
-              fillColor = ~pal_tot(cd_shape_final$people_monthly),
-              popup = cd_tot,
+              fillColor = pal_tot(cd_shape_final$people_monthly),
+              popup = ~cd_tot,
               group = "Total") %>% 
   addLegend('topleft', pal = pal_tot,
             values = cd_shape_final$people_monthly,
             group = "Total",
-            title = "Monthly Average DHS Shelter Entries")
+            title = "Monthly Average DHS Shelter Entries"#,
+            #labFormat = labelFormat(suffix = " people")
+            )
 
 
 
